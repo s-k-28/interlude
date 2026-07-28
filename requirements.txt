@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+genblaze[google,elevenlabs,assemblyai,gmicloud]
+paritok
+boto3

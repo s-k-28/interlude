@@ -1,0 +1,179 @@
+{
+  "assets": [
+    {
+      "content_type": "audio/mpeg",
+      "deduplicated": false,
+      "key": "description-audio/0b/03/0b0306dbf6b10f8a27cca212b80d49738b1e79a67809b655ff7b550a356cad81.mp3",
+      "namespace": "description-audio",
+      "sha256": "0b0306dbf6b10f8a27cca212b80d49738b1e79a67809b655ff7b550a356cad81",
+      "size": 0
+    },
+    {
+      "content_type": "audio/mpeg",
+      "deduplicated": false,
+      "key": "description-audio/d9/91/d9913f1b8d1092843228a73f5a6af6765aee02bb53fad17060a77aeabee1878d.mp3",
+      "namespace": "description-audio",
+      "sha256": "d9913f1b8d1092843228a73f5a6af6765aee02bb53fad17060a77aeabee1878d",
+      "size": 0
+    },
+    {
+      "content_type": "audio/mpeg",
+      "deduplicated": false,
+      "key": "description-audio/a1/5d/a15d5aaf9d72e8ade1b888e9f3548864bbb388c36ba57bdf69070b255c8cd935.mp3",
+      "namespace": "description-audio",
+      "sha256": "a15d5aaf9d72e8ade1b888e9f3548864bbb388c36ba57bdf69070b255c8cd935",
+      "size": 0
+    },
+    {
+      "content_type": "audio/mpeg",
+      "deduplicated": false,
+      "key": "description-audio/e8/d1/e8d1d42045dcc0987712719c5f376d4767afb899de5286860a4fcba13f26a2fe.mp3",
+      "namespace": "description-audio",
+      "sha256": "e8d1d42045dcc0987712719c5f376d4767afb899de5286860a4fcba13f26a2fe",
+      "size": 0
+    },
+    {
+      "content_type": "audio/mpeg",
+      "deduplicated": false,
+      "key": "description-audio/57/2f/572fb3685a90dea11202fbe68e212fc812ce67f0d46315d49c8b783e519f0447.mp3",
+      "namespace": "description-audio",
+      "sha256": "572fb3685a90dea11202fbe68e212fc812ce67f0d46315d49c8b783e519f0447",
+      "size": 0
+    },
+    {
+      "content_type": "audio/mpeg",
+      "deduplicated": false,
+      "key": "description-audio/42/59/425940163d4960f5a02c4339565ad9dbfcc9677b096c43cd58e87e94dff56e02.mp3",
+      "namespace": "description-audio",
+      "sha256": "425940163d4960f5a02c4339565ad9dbfcc9677b096c43cd58e87e94dff56e02",
+      "size": 0
+    },
+    {
+      "content_type": "audio/mpeg",
+      "deduplicated": false,
+      "key": "description-audio/aa/3a/aa3ae316a2a693d4a8afc064f620c5470f14f66592b10b687336769935d52c47.mp3",
+      "namespace": "description-audio",
+      "sha256": "aa3ae316a2a693d4a8afc064f620c5470f14f66592b10b687336769935d52c47",
+      "size": 0
+    },
+    {
+      "content_type": "audio/mpeg",
+      "deduplicated": false,
+      "key": "description-audio/50/98/5098ccf8489059324066f1c32b9a77ce27be7fae478897ebfd759d2c70f91ca9.mp3",
+      "namespace": "description-audio",
+      "sha256": "5098ccf8489059324066f1c32b9a77ce27be7fae478897ebfd759d2c70f91ca9",
+      "size": 0
+    },
+    {
+      "content_type": "audio/mpeg",
+      "deduplicated": false,
+      "key": "description-audio/68/75/6875385f3edf5a1e5891cd26719957b51c05b76c6868a7208f4bc0b0b991207d.mp3",
+      "namespace": "description-audio",
+      "sha256": "6875385f3edf5a1e5891cd26719957b51c05b76c6868a7208f4bc0b0b991207d",
+      "size": 0
+    },
+    {
+      "content_type": "audio/mpeg",
+      "deduplicated": false,
+      "key": "description-audio/25/5e/255e928d94a5bb641dd67e4e0bac54b94431805dde28ca3d99ac19a4cff1f65d.mp3",
+      "namespace": "description-audio",
+      "sha256": "255e928d94a5bb641dd67e4e0bac54b94431805dde28ca3d99ac19a4cff1f65d",
+      "size": 0
+    }
+  ],
+  "canonical_hash": "8a03d5bba4259c7276c8cefb87abc52bffee415dad8ef0c4dbe2a2659156f3d6",
+  "created_at": "2026-07-29T17:18:40+00:00",
+  "metadata": {
+    "gaps_found": 10,
+    "segments_described": 10,
+    "segments_rendered": 10,
+    "segments_within_budget": 10,
+    "status": "complete"
+  },
+  "run_id": "f275ed11d8f4",
+  "schema_version": "1.0",
+  "source": {
+    "key": "source/lecture-enzymes.mp4",
+    "sha256": "abababababababababababababababababababababababababababababababab"
+  },
+  "steps": [
+    {
+      "accepted": true,
+      "attempts": 1,
+      "duration_ms": 0,
+      "index": 0,
+      "input_keys": [],
+      "model": "",
+      "model_version": "",
+      "name": "transcribe",
+      "output_keys": [],
+      "params": {},
+      "provider": "interlude",
+      "seed": null
+    },
+    {
+      "accepted": true,
+      "attempts": 1,
+      "duration_ms": 0,
+      "index": 1,
+      "input_keys": [],
+      "model": "",
+      "model_version": "",
+      "name": "detect_gaps",
+      "output_keys": [],
+      "params": {},
+      "provider": "interlude",
+      "seed": null
+    },
+    {
+      "accepted": true,
+      "attempts": 1,
+      "duration_ms": 0,
+      "index": 2,
+      "input_keys": [],
+      "model": "",
+      "model_version": "",
+      "name": "describe",
+      "output_keys": [],
+      "params": {},
+      "provider": "interlude",
+      "seed": null
+    },
+    {
+      "accepted": true,
+      "attempts": 1,
+      "duration_ms": 0,
+      "index": 3,
+      "input_keys": [],
+      "model": "",
+      "model_version": "",
+      "name": "synthesize",
+      "output_keys": [],
+      "params": {},
+      "provider": "interlude",
+      "seed": null
+    },
+    {
+      "accepted": true,
+      "attempts": 1,
+      "duration_ms": 0,
+      "index": 4,
+      "input_keys": [],
+      "model": "",
+      "model_version": "",
+      "name": "manifest",
+      "output_keys": [],
+      "params": {},
+      "provider": "interlude",
+      "seed": null
+    }
+  ],
+  "tokens": {
+    "calls": 0,
+    "completion_tokens": 0,
+    "prompt_tokens_compressed": 0,
+    "prompt_tokens_uncompressed": 0,
+    "reduction_ratio": 0.0,
+    "tokens_saved": 0
+  }
+}

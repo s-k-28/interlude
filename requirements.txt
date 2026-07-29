@@ -1,6 +1,10 @@
 fastapi
 uvicorn[standard]
+pydantic>=2
 python-dotenv
-genblaze[google,elevenlabs,assemblyai,gmicloud]
-paritok
 boto3
+genblaze[google,elevenlabs,assemblyai,gmicloud]
+# do NOT add paritok[proxy] or paritok[toolselect] — those pull sentence-transformers and PyTorch (~3GB)
+paritok
+pytest
+httpx

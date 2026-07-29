@@ -1,0 +1,560 @@
+# Paritok Python SDK — Verified API Reference
+
+**Source of truth:** `paritok-1.2.7-py3-none-any.whl` from PyPI (downloaded + unzipped), plus
+`.info.description` (the 27,930-byte README) from `https://pypi.org/pypi/paritok/json`.
+Everything below is copied from real source unless explicitly marked **UNVERIFIED**.
+
+**What it is:** open-source agent *context compression*. It sits between your agent and the
+LLM API, compresses tool results / history / tool schemas with a local 4B model
+(`paritok-4b-v1` via Ollama) or a hosted GPU endpoint, and forwards upstream. Compression is
+non-destructive: compressed blocks become `[REF:id]` tags the model can expand via a
+virtual tool.
+
+---
+
+## 0. Version discrepancy — CONFIRMED REAL
+
+| Source | Value |
+|---|---|
+| `paritok-1.2.7.dist-info/METADATA` -> `Version:` | **1.2.7** |
+| `paritok/__init__.py` line 3 -> `__version__` | **1.2.3** |
+
+```python
+# paritok/__init__.py
+"""Paritok: Open-source agent context compression via local model."""
+
+__version__ = "1.2.3"
+```
+
+Genuine packaging bug in the shipped 1.2.7 wheel: the hard-coded `__version__` string was
+not bumped with the release. **Do not use `paritok.__version__` for version gating** — use
+`importlib.metadata.version("paritok")`. Worth reporting upstream.
+
+`/health` returns `{"status":"ok","version":"..."}` (README), so the proxy's reported
+version may also be affected. **UNVERIFIED** which of the two it echoes.
+
+---
+
+## 1. Install & dependencies
+
+```bash
+python -m pip install "paritok[proxy]"       # middleware + CLI (recommended)
+python -m pip install paritok                # core only
+python -m pip install "paritok[toolselect]"  # embedding tool-selection without the full proxy
+```
+
+Core requires: `click>=8.0`, `httpx>=0.27.0`, `pyyaml>=6.0`, `tiktoken>=0.7.0`
+`[proxy]` adds: `numpy>=1.24`, `sentence-transformers>=2.2.0`, `starlette>=0.38.0`, `uvicorn>=0.30.0`
+`[toolselect]` adds: `numpy>=1.24`, `sentence-transformers>=2.2.0`
+`[dev]`: `pytest`, `ruff`
+
+---
+
+## 2. Public surface (`paritok/__init__.py`)
+
+```python
+from paritok.config import ParitokConfig
+from paritok.middleware.wrapper import CompressionStats, ParitokClient, ParitokEngine
+from paritok.pipelines.compress import CompressionPipeline, CompressionResult
+from paritok.pipelines.tool_discovery import ToolDiscoveryPipeline
+from paritok.storage import MemoryShadowStorage
+```
+
+`__all__ = ["CompressionPipeline", "CompressionResult", "CompressionStats",
+"MemoryShadowStorage", "ParitokClient", "ParitokEngine", "ParitokConfig",
+"ToolDiscoveryPipeline"]`
+
+Package layout:
+```
+paritok/
+  __init__.py  cli.py  config.py  storage.py  token_counter.py  tool_topk.py
+  middleware/   __init__.py  wrapper.py
+  pipelines/    __init__.py  compress.py  tool_discovery.py  virtual.py
+  proxy/        __init__.py  codex_setup.py  pricing.py  server.py
+                adapters/  __init__.py  anthropic.py  openai.py  responses.py
+  strategies/   __init__.py  chunking.py  gpu_server.py  local_model.py
+                prompts.py  tagger.py  system_prompts/
+```
+
+---
+
+## 3. `ParitokClient` — SDK mode (secondary; proxy is the recommended path)
+
+```python
+class ParitokClient:
+    def __init__(
+        self,
+        client,                                # an anthropic.Anthropic() / OpenAI client
+        config: ParitokConfig | None = None,
+        storage: ShadowStorage | None = None,
+    ):
+        self._client = client
+        self._engine = ParitokEngine(config, storage)
+        self._disabled = os.environ.get("PARITOK_DISABLE", "").strip() in ("1", "true", "yes")
+        self.messages = _MessagesProxy(self)
+
+    def __getattr__(self, name):               # everything else proxies to wrapped client
+        return getattr(self._client, name)
+```
+
+It only intercepts **`client.messages.create(**kwargs)`** (Anthropic-shaped). It reads
+`kwargs["messages"]` and `kwargs["tools"]`, runs `ParitokEngine.process_request`, rewrites
+both kwargs, calls upstream, then attaches:
+
+- `response._paritok_savings` -> a `CompressionStats` instance
+- for each virtual `tool_use` block: `block._paritok_resolved` -> the resolved dict
+
+> Explicit caveat in source: virtual tool calls are resolved but **NOT** automatically fed
+> back into the conversation. The caller must check `block._paritok_resolved` and construct
+> the `tool_result` message for the next turn.
+
+There is **no** `client.chat.completions` interception — OpenAI chat-completions and the
+Responses API are handled only by the **proxy** (`paritok/proxy/adapters/{openai,responses}.py`).
+
+README snippet (verbatim):
+```python
+import anthropic
+import paritok
+
+client = paritok.ParitokClient(anthropic.Anthropic())
+resp = client.messages.create(
+    model="claude-sonnet-4-20250514", max_tokens=4096, messages=[...]
+)
+print(resp._paritok_savings.saved_tokens, resp._paritok_savings.ratio)
+```
+
+Kill switch: `export PARITOK_DISABLE=1` (also `true`/`yes`) -> full passthrough.
+
+---
+
+## 4. `ParitokEngine` — the core, shared by SDK and proxy
+
+```python
+class ParitokEngine:
+    def __init__(self, config: ParitokConfig | None = None,
+                 storage: ShadowStorage | None = None):
+        self.config    = config or ParitokConfig()
+        self.storage   = storage or MemoryShadowStorage()
+        self.pipeline  = CompressionPipeline(self.config, self.storage)
+        self.discovery = ToolDiscoveryPipeline(self.config)
+
+    def process_request(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        upstream_model: str = "",
+    ) -> tuple[list[dict], list[dict] | None, CompressionStats, list[dict]]:
+        """Returns (compressed_messages, modified_tools, stats, stubbed_tools)."""
+
+    def resolve_virtual_call(
+        self,
+        tool_name: str,
+        tool_input: dict,
+        stubbed_tools: list[dict] | None = None,
+    ) -> dict | None:
+        """None if not a virtual tool."""
+```
+
+`process_request` pipeline, in order:
+1. Tool discovery filter — only if `tools and query and len(tools) > config.tool_discovery.top_k`
+2. Compress `tool_result` content blocks
+3. Compress old history — only if `config.history.enabled`
+4. Inject virtual tools (`expand_context`, `gateway_search_tools`)
+
+`resolve_virtual_call` handles two names:
+- `"expand_context"` — reads `tool_input["shadow_id"]` (tolerates `"id"`, and values like
+  `"abc123 src=foo.py"` or `"[REF:abc123 ...]"`). Returns `{"content": original}`. If the id
+  aged out it returns a **non-fatal** `{"content": "[Reference '...' can no longer be expanded ...]"}`.
+- `"gateway_search_tools"` — reads `tool_input["query"]`, returns `{"tools": found}`.
+  Requires the caller to pass back the per-request `stubbed_tools`.
+
+Pass `upstream_model=` so token counts use the *provider's* tokenizer (o200k for gpt-5/4.1/o3)
+rather than the cl100k default — this makes measured savings match real billing.
+
+---
+
+## 5. `CompressionStats` — EXACT fields (report token reduction from these)
+
+`paritok/middleware/wrapper.py:36`, a `@dataclass`:
+
+| Field | Type | Default |
+|---|---|---|
+| `original_tokens` | `int` | `0` |
+| `compressed_tokens` | `int` | `0` |
+| `items_compressed` | `int` | `0` |
+| `items_skipped` | `int` | `0` |
+| `cache_hits` | `int` | `0` |
+| `tools_original` | `int` | `0` |
+| `tools_kept` | `int` | `0` |
+| `history_turns_compressed` | `int` | `0` |
+
+Computed properties (**not** fields):
+```python
+@property
+def saved_tokens(self) -> int:      # original_tokens - compressed_tokens
+@property
+def ratio(self) -> float:           # round(1 - compressed_tokens/original_tokens, 3); 0.0 if original==0
+@property
+def tools_filtered(self) -> int:    # tools_original - tools_kept
+```
+
+WARNING: `ratio` here is the **fraction saved** (higher = better). The proxy's `/stats` JSON
+field `compression_ratio` is described in the README as "lower ratio is better"
+(compressed/original). Do not conflate the two. **UNVERIFIED**: exact formula inside
+`proxy/server.py`.
+
+## 5b. `CompressionResult` — EXACT fields
+
+`paritok/pipelines/compress.py:68`, a `@dataclass`:
+
+| Field | Type | Default |
+|---|---|---|
+| `compressed` | `str` | required |
+| `original_tokens` | `int` | required |
+| `compressed_tokens` | `int` | required |
+| `shadow_id` | `str \| None` | `None` |
+| `metadata` | `dict` | `field(default_factory=dict)` |
+
+Properties: `ratio` (`round(1 - compressed_tokens/original_tokens, 3)`, 0.0 if original==0)
+and `saved_tokens`. Source note: "compressed_tokens includes the `[REF:id]` tag overhead
+(~5 tokens), so the ratio is slightly lower than the pure compression ratio."
+
+Observed `metadata` keys: `{"path_shortcircuit": True, "source": source}` on the path-keyed
+short-circuit path. Other keys exist on other paths — **UNVERIFIED** (a reason-style key is
+implied by the internal `self._skip(content, original_tokens, "already_compressed")`).
+
+## 5c. `CompressionPipeline`
+
+```python
+class CompressionPipeline:
+    def __init__(self, config: ParitokConfig | None = None,
+                 storage: ShadowStorage | None = None): ...
+
+    def compress(
+        self,
+        content: str,
+        *,
+        query: str | None = None,          # USER INTENT — drives keep/drop
+        level: str | None = None,          # SEG level L0-L3; default = model default (L0)
+        kind: str | None = None,           # SEG kind (file_read, log_output, ...); sniffed if None
+        target_ratio: str | None = None,   # legacy ("30%" / "0.3"), mapped to level. Prefer `level`.
+        source: str | None = None,         # e.g. a file_path -> enables path-keyed short-circuit
+        upstream_model: str | None = None, # tokenizer to bill/count with
+        model_input: str | None = None,    # alternate text to FEED the model; defaults to `content`
+    ) -> CompressionResult: ...
+```
+
+Backend chosen in `__init__`: `GpuServerStrategy(config.gpu_server)` if
+`config.use_gpu_server` else `LocalModelStrategy(config.local_model)`.
+
+Early-exit paths: already-compressed (`[REF:...]` regex match) -> skip; path-keyed
+short-circuit when `source` matches a stored original (bypasses the min/max token gates);
+then the min/max token gates from `CompressionConfig`.
+
+---
+
+## 6. `ParitokConfig` and nested config dataclasses (`paritok/config.py`)
+
+```python
+@dataclass
+class ParitokConfig:
+    use_gpu_server: bool = False           # THE switch: False = self-host, True = paritok.com GPU
+    compression:    CompressionConfig    = field(default_factory=CompressionConfig)
+    history:        HistoryConfig        = field(default_factory=HistoryConfig)
+    tool_discovery: ToolDiscoveryConfig  = field(default_factory=ToolDiscoveryConfig)
+    local_model:    LocalModelConfig     = field(default_factory=LocalModelConfig)
+    gpu_server:     GpuServerConfig      = field(default_factory=GpuServerConfig)
+    trace:          TraceConfig          = field(default_factory=TraceConfig)
+    codex:          CodexConfig          = field(default_factory=CodexConfig)
+    shadow_storage: str = "memory"         # "memory" | "redis"
+
+    @property
+    def model(self) -> LocalModelConfig | GpuServerConfig:
+        return self.gpu_server if self.use_gpu_server else self.local_model
+```
+
+Class methods:
+```python
+ParitokConfig.from_dict(data: dict) -> ParitokConfig
+ParitokConfig.from_yaml(path: str | Path) -> ParitokConfig          # pyyaml safe_load
+ParitokConfig.load(path: str | Path | None = None) -> ParitokConfig # file, then env overrides
+```
+`from_dict` raises `ValueError("Unknown config key '<k>' in <Type>. Valid: {...}")` on typos.
+
+### `LocalModelConfig` — self-hosted (Ollama / any OpenAI-compatible endpoint)
+| Field | Default |
+|---|---|
+| `base_url: str` | `"http://localhost:11434/v1"` |
+| `model: str` | `"paritok-4b-v1"` |
+| `temperature: float` | `0.0` |
+| `timeout: float` | `120.0` |
+| `api_key: str` | `""` (optional bearer; empty for local Ollama) |
+| `num_ctx: int` | `8192` |
+
+### `GpuServerConfig` — Paritok-hosted
+| Field | Default |
+|---|---|
+| `base_url: str` | `"https://www.paritok.com/api"` |
+| `model: str` | `"paritok-4b-v1"` |
+| `temperature: float` | `0.0` |
+| `timeout: float` | `90.0` |
+| `api_key: str` | `""` (from paritok.com dashboard, or `PARITOK_API_KEY`) |
+
+Docstring: the proxy POSTs each segment to `{base_url}/compress` and health-checks
+`{base_url}/test`. If unreachable it **warns at startup and passes content through
+uncompressed** (never aborts). Keys look like `pk_live_...` per the README.
+
+### `CompressionConfig`
+`min_tokens: int = 512`, `max_tokens: int = 50000`, `refusal_threshold: float = 0.05`.
+Asserts: `min_tokens >= 0`, `max_tokens > min_tokens`, `0.0 <= refusal_threshold <= 1.0`.
+
+### `HistoryConfig`
+`enabled: bool = True`, `keep_recent_turns: int = 4`, `context_threshold: float = 0.8`,
+`context_window: int = 200_000`. Asserts: `keep_recent_turns >= 1`,
+`0 < context_threshold <= 1`, `context_window > 0`.
+
+### `ToolDiscoveryConfig`
+`strategy: str = "embedding"`, `top_k: int = 5`, `k_max: int = 8`, `adaptive: bool = True`,
+`mcp_signal_threshold: float = 1.0`.
+`_VALID_STRATEGIES = frozenset({"relevance", "passthrough", "embedding"})` (asserted).
+
+### `TraceConfig`
+`enabled: bool = False`, `path: str = "compress_trace.jsonl"`. When on, every compression
+event (original + compressed body, tokens, ratio) is appended as JSONL. An env-var override
+is read by `_resolve_trace_path(config)` and takes precedence — **UNVERIFIED** exact var name.
+
+### `CodexConfig`
+`enabled: bool = False`, `model: str = "gpt-5"`, `api_key: str = ""`, `config_path: str = ""`.
+Codex ignores `OPENAI_BASE_URL`, so `paritok up`/`proxy` writes `~/.codex/config.toml`
+(backing up any existing one) with `experimental_bearer_token`. Wire protocol fixed to
+`responses`.
+
+### Environment variables (all read in `ParitokConfig.load`)
+| Var | Effect |
+|---|---|
+| `PARITOK_USE_GPU_SERVER` | truthy = `"1"`, `"true"`, `"yes"` (lowercased/stripped) -> `use_gpu_server` |
+| `PARITOK_MODEL` | sets **both** `local_model.model` and `gpu_server.model` |
+| `PARITOK_OLLAMA_URL` | sets `local_model.base_url` |
+| `PARITOK_API_KEY` | sets **both** `gpu_server.api_key` and `local_model.api_key` |
+| `PARITOK_DISABLE` | (read in `ParitokClient.__init__`) `"1"/"true"/"yes"` -> passthrough |
+
+Env vars are applied **after** the YAML file, so they win.
+
+---
+
+## 7. Tool discovery — `paritok/pipelines/tool_discovery.py`
+
+```python
+@dataclass
+class DiscoveryResult:
+    tools: list[dict]           # full list to send to the LLM (top-K full + stubs)
+    full_tools: list[dict]      # the top-K with complete schemas
+    stubbed_tools: list[dict]   # original schemas of tools replaced with stubs
+    original_count: int
+    kept_count: int
+
+    @property
+    def filtered_count(self) -> int:   # original_count - kept_count
+
+
+class ToolDiscoveryPipeline:
+    def __init__(self, config: ParitokConfig | None = None): ...
+    def filter_tools(self, tools: list[dict], query: str,
+                     session_id: str | None = None) -> DiscoveryResult: ...
+    def search_filtered_tools(self, query, stubbed_tools) -> list[dict]   # signature UNVERIFIED
+```
+
+Strategy selection inside `filter_tools`:
+- `limit = cfg.k_max if strategy == "embedding" else cfg.top_k`
+- `"passthrough"` **or** `len(tools) <= limit` -> everything kept, no stubs
+- `"relevance"` -> `self._relevance_filter(tools, query, cfg.top_k)` (keyword scoring, top 5 with score > 0)
+- `"embedding"` -> `self._embedding_filter(...)`; needs the `toolselect` extra, otherwise
+  raises `RuntimeError` naming that install command
+- anything else -> `ValueError("Unknown tool discovery strategy: ...")`
+
+---
+
+## 8. Token counting — `paritok/token_counter.py`
+
+```python
+def count_tokens(text: str, model_or_encoding: str = _DEFAULT_ENCODING) -> int
+
+def token_cost_ratio(text: str, model_or_encoding: str = _DEFAULT_ENCODING) -> dict
+    # -> {"tokens": int, "chars": int, "ratio": round(tokens/chars, 3)}
+    # empty text -> {"tokens": 0, "chars": 0, "ratio": 0.0}
+
+# private
+def _get_encoder(encoding: str = _DEFAULT_ENCODING) -> tiktoken.Encoding
+def _resolve_encoding(model_or_encoding: str) -> str
+```
+
+`_resolve_encoding` is two-tier: exact base-id lookup in `_MODEL_TO_ENCODING`, then
+longest-matching `<base>-` prefix in `_MODEL_PREFIX_TO_ENCODING`, else falls back to
+`_DEFAULT_ENCODING` — "safe default, never guessed and never raised."
+`_DEFAULT_ENCODING` is cl100k-family per source comments. **UNVERIFIED**: exact literal.
+
+---
+
+## 9. `paritok.tool_topk` (embedding top-K selector)
+
+```python
+DEFAULT_K  # module constant
+
+class TopKToolSelector: ...
+class SessionFrozenSelector: ...
+
+def predict_topk_tools(user_message: str, tools: Iterable[dict], k: int = DEFAULT_K) -> list[str]
+def predict_topk_dynamic(user_message: str, tools: Iterable[dict], ...) -> list[str]
+def predict_topk_frozen(session_id: str, user_message: str, tools: Iterable[dict]) -> list[str]
+def register_recovered_tools(session_id: str, names: Iterable[str]) -> None
+
+def apply_selection(tools: list[dict], keep_names: set, wire: str = "anthropic") -> list[dict]
+def apply_selection_adaptive(tools: list[dict], keep_ordered, wire: str = "anthropic", ...) -> list[dict]
+
+def looks_like_missing_tool_help(agent_text: str) -> bool
+def recover_tools_from_help(help_text: str, candidate_tools: Iterable[dict], ...)
+```
+`wire` accepts `"anthropic"` (used everywhere in-tree) and, per `_make_stub_openai`,
+`"openai"`. Selection is *frozen per session* so tool schemas stay byte-identical across
+turns — that is what makes them prompt-cache hits.
+
+## 10. `paritok.storage`
+
+```python
+def content_hash(content: str) -> str
+class ShadowStorage(ABC): ...
+class MemoryShadowStorage(ShadowStorage): ...
+```
+Methods observed in use: `retrieve(shadow_id) -> str | None`,
+`get_shadow_for_path(source) -> str | None`, `get_cached_compressed(shadow_id) -> str | None`.
+A store/save method exists — **UNVERIFIED** exact name/signature.
+`ParitokConfig.shadow_storage` also accepts `"redis"`; no Redis class is exported from
+`storage.py` — **UNVERIFIED** where the redis backend lives.
+
+## 11. `paritok.strategies`
+
+- `local_model.LocalModelStrategy(config: LocalModelConfig)` — default Ollama/OpenAI-compatible path.
+  Helpers: `_ratio_to_level(target_ratio)`, `_strip_thinking(text)`, `_unwrap_seg(raw)`.
+- `gpu_server.GpuServerStrategy(config: GpuServerConfig)` — hosted path.
+- `chunking.split_into_chunks_structural(...)`, `chunking.deduplicate_definitions(text)`
+- `prompts.system_prompt_for_kind(kind: str | None) -> str` (loads from `strategies/system_prompts/`)
+- `tagger.classify_segment_kind(msg, position_idx)`, `reclassify_tool_result(kind, content)`,
+  `classify_kind_from_content(content)`, `detect_stale_files(segments)`,
+  `assign_level(seg, seg_idx, total_segs, ...)`, `tag_messages(messages) -> list[dict]`
+
+SEG levels are `L0`-`L3` (L0 = model default, per the `compress(level=...)` docstring).
+**UNVERIFIED**: exact target ratio each level maps to.
+
+Note: compression strategies are **not** a user-selectable config knob. The only config-level
+"strategy" selector is `tool_discovery.strategy` (`"embedding"` | `"relevance"` |
+`"passthrough"`); the compression strategy is chosen implicitly by `use_gpu_server`.
+
+---
+
+## 12. CLI (click) — `paritok/cli.py`
+
+Group: `main()` — "Paritok: Open-source agent context compression." with `@click.version_option()`.
+
+| Command | Options |
+|---|---|
+| `paritok init` | `--force` (flag, overwrite existing), `--path` (default `paritok.yaml`) |
+| `paritok config` | none — prints resolved config (backend, compression thresholds, active model block, tool discovery, shadow storage) |
+| `paritok proxy` | `--host` (`127.0.0.1`), `--port` (`8080`), `--anthropic-url` (`https://api.anthropic.com`), `--openai-url` (`https://api.openai.com`), `--config-file` (existing path), `--log-level` (`debug\|info\|warning\|error`, default `info`) |
+| `paritok up` | same as `proxy` **plus** `--registry-model` (default `paritok/paritok-4b-v1`) |
+
+Both `proxy` and `up` auto-pick up `./paritok.yaml` when `--config-file` is omitted, and both
+call `_maybe_write_codex_config(cfg, host, port)` before serving. `up` additionally runs
+`_ensure_ollama_model(local_model, registry_model, base_url)` when `use_gpu_server` is false,
+raising `ClickException` if the model can't be prepared.
+
+```python
+def run_proxy(
+    host: str = "127.0.0.1",
+    port: int = 8080,
+    anthropic_base_url: str = "https://api.anthropic.com",
+    openai_base_url: str = "https://api.openai.com",
+    config_path: str | None = None,
+    log_level: str = "info",
+):  # paritok/proxy/server.py:1262 — raises ImportError if uvicorn missing
+```
+
+---
+
+## 13. Proxy mode (the recommended integration)
+
+```bash
+paritok up                 # pulls model if missing (~2.5GB q4), then serves on :8080
+# separate shell:
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8080   # Claude Code
+export OPENAI_BASE_URL=http://127.0.0.1:8080      # Cursor / OpenAI-SDK agents
+```
+
+Two observability endpoints:
+```bash
+curl http://127.0.0.1:8080/health   # {"status":"ok","version":"..."}
+curl http://127.0.0.1:8080/stats
+```
+`/stats` shape (from README):
+```json
+{
+  "total_requests": 42,
+  "input_tokens_original": 512340,
+  "input_tokens_compressed": 138221,
+  "compression_ratio": 0.27,
+  "tokens_saved": 374119,
+  "estimated_cost_saved_usd": "$1.01"
+}
+```
+Scope caveat (README — important for honest reporting): these numbers cover **only what
+Paritok intervenes in** — compressed content plus stubbed tool schemas. System prompt and
+model output are deliberately excluded. `estimated_cost_saved_usd` is cache-aware: content
+savings priced at the full input rate; tool-schema savings priced as a cache write (1.25x)
+on turn 1 and a cache read after (Claude 0.1x, GPT-5 0.1x, gpt-4o 0.5x). Unknown model ->
+$3/M. Rates live in `paritok/proxy/pricing.py`.
+
+### Wire-protocol adapters (proxy only)
+- `proxy/adapters/anthropic.py` — `ParsedRequest`, `parse_request(body)`, `extract_query`,
+  `extract_tool_results`, `replace_tool_result_content`, `find_virtual_tool_uses`
+- `proxy/adapters/openai.py` — `ParsedRequest`, `parse_request`, `extract_query`,
+  `extract_tool_results`, `replace_tool_message_content`, `find_virtual_tool_calls`
+- `proxy/adapters/responses.py` — `ParsedRequest`, `parse_request`, `normalize_input`,
+  `extract_query`, `find_virtual_function_calls`, `has_real_function_call`,
+  `conceal_virtual_calls`
+
+There is **no httpx transport adapter and no OpenAI-SDK client wrapper** in the package.
+Integration is either (a) point the base URL at the proxy, or (b) wrap an Anthropic-shaped
+client with `ParitokClient`.
+
+---
+
+## 14. Recommended integration for measured token reduction
+
+```python
+import paritok
+
+engine = paritok.ParitokEngine(paritok.ParitokConfig.load("paritok.yaml"))
+msgs, tools, stats, stubbed = engine.process_request(
+    messages, tools, upstream_model="claude-sonnet-4-20250514"
+)
+print(stats.original_tokens, stats.compressed_tokens,
+      stats.saved_tokens, stats.ratio,          # ratio = fraction SAVED
+      stats.tools_original, stats.tools_kept, stats.tools_filtered,
+      stats.items_compressed, stats.items_skipped, stats.cache_hits,
+      stats.history_turns_compressed)
+```
+Using `ParitokEngine` directly (rather than `ParitokClient`) gives the stats object without
+requiring an Anthropic client and works with any transport — but you own resolving
+`expand_context` / `gateway_search_tools` via `engine.resolve_virtual_call(...)`.
+
+---
+
+## 15. Open items (UNVERIFIED)
+
+- `_DEFAULT_ENCODING` literal value in `token_counter.py`.
+- Trace-path env-var name honoured by `_resolve_trace_path`.
+- `ShadowStorage` write-method name/signature; location of the `"redis"` backend.
+- Exact `compression_ratio` formula in `proxy/server.py` (README says "lower is better",
+  the opposite orientation of `CompressionStats.ratio`).
+- Full `metadata` key set on `CompressionResult`.
+- SEG level -> target-ratio mapping (`_ratio_to_level`).
+- Whether `/health`'s `version` echoes the stale `1.2.3`.

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interlude — Operations</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <span class="wordmark">Interlude</span>
+  <div id="health-pill"><span id="health-dot"></span><span id="health-text">checking</span></div>
+</header>
+
+<main>
+
+  <section id="job-list-panel">
+
+    <form id="submit-form">
+      <input id="input-url" type="url" placeholder="https://.../lecture.mp4" required>
+      <input id="input-title" type="text" placeholder="Optional title">
+      <button id="btn-submit" type="submit">Describe</button>
+    </form>
+
+    <div id="submit-error" class="hidden"></div>
+
+    <table id="job-table">
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Status</th>
+          <th class="num">Described</th>
+          <th class="num">Duration</th>
+        </tr>
+      </thead>
+      <tbody id="job-tbody"></tbody>
+    </table>
+
+    <div id="job-empty">
+      <p>No jobs yet. Paste a lecture video URL above to start.</p>
+      <code>https://media.university.edu/lectures/phys201-week03.mp4</code>
+    </div>
+
+    <div id="job-error" class="hidden">
+      <span>Could not load jobs.</span>
+      <button id="btn-retry-jobs" type="button">Retry</button>
+    </div>
+
+  </section>
+
+  <section id="detail-panel">
+
+    <div id="detail-placeholder">Select a job</div>
+
+    <div id="detail-content" class="hidden">
+
+      <h1 id="detail-title"></h1>
+
+      <div id="detail-meta">
+        <span id="detail-status" class="pill pending"></span>
+        <code id="detail-jobid"></code>
+        <span id="detail-created"></span>
+      </div>
+
+      <div id="detail-banner" class="hidden"></div>
+
+      <div id="stage-strip"></div>
+
+      <div id="waveform-section">
+        <h2>Timeline</h2>
+        <div id="waveform"></div>
+        <div id="waveform-legend"></div>
+      </div>
+
+      <div id="segments-section">
+        <h2>Segments</h2>
+        <table id="segments-table">
+          <thead>
+            <tr>
+              <th class="num">Start</th>
+              <th class="num">End</th>
+              <th class="num">Duration</th>
+              <th class="num">Budget</th>
+              <th class="num">Attempts</th>
+              <th class="num">Fit</th>
+              <th>Description</th>
+              <th>Audio</th>
+            </tr>
+          </thead>
+          <tbody id="segments-tbody"></tbody>
+        </table>
+      </div>
+
+      <div id="tokens-section">
+        <h2>Token usage</h2>
+        <table id="tokens-table">
+          <tbody id="tokens-tbody"></tbody>
+        </table>
+        <p class="table-caption">measured prompt-token reduction</p>
+      </div>
+
+      <div id="manifest-section">
+        <h2>Manifest</h2>
+        <code id="manifest-hash"></code>
+        <button id="btn-copy-hash" type="button">copy</button>
+        <a id="link-manifest" href="#">view full manifest</a>
+      </div>
+
+      <button id="btn-resume" type="button" disabled>Resume</button>
+
+    </div>
+
+  </section>
+
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,7 +1,13 @@
 .env
 .env.local
 __pycache__/
-venv/
 *.pyc
+.pytest_cache/
+venv/
+.venv/
 node_modules/
 .DS_Store
+*.mp4
+*.mp3
+*.wav
+.probe*

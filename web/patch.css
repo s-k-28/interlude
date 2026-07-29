@@ -1,0 +1,38 @@
+/* Integration patch — rules the two frontend agents each assumed the other owned.
+   Loaded after style.css. Merge into style.css when the sandbox permits edits. */
+
+/* Health pill dot. app.js sets classList to ok | warn | error. */
+#health-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  display: inline-block;
+  flex: 0 0 auto;
+}
+#health-dot.ok { background: var(--ok); }
+#health-dot.warn { background: var(--warn); }
+#health-dot.error { background: var(--error); }
+
+/* Status banner for partial and failed runs. */
+.banner {
+  padding: 10px 12px;
+  margin: 12px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  border: 1px solid var(--hairline);
+  border-left-width: 3px;
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 4px;
+}
+.banner.partial { border-left-color: var(--warn); }
+.banner.failed { border-left-color: var(--error); }
+
+/* Selected row in the job table. */
+#job-tbody tr.selected {
+  background: rgba(79, 156, 249, 0.10);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+#job-tbody tr { cursor: pointer; }
+#job-tbody tr:hover { background: rgba(255, 255, 255, 0.03); }

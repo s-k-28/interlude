@@ -98,15 +98,23 @@ def compress_prefix(text: str) -> CompressionOutcome:
         return CompressionOutcome(text, original, original, applied=False)
 
     try:
+        # VERIFIED against the 1.2.7 wheel: the engine has no compress().
+        # The real entry point is process_request(messages, tools, upstream_model),
+        # which returns (messages, tools, CompressionStats, stubbed_tools).
         from paritok import ParitokEngine
 
         engine = ParitokEngine()
-        result: Any = engine.compress(text)
-        compressed_text = getattr(result, "compressed", text)
+        messages = [{"role": "user", "content": text}]
+        compressed, _tools, stats, _stubbed = engine.process_request(messages, None, "")
+
+        out = text
+        if compressed and isinstance(compressed[0].get("content"), str):
+            out = compressed[0]["content"]
+
         return CompressionOutcome(
-            text=compressed_text,
-            original_tokens=int(getattr(result, "original_tokens", original)),
-            compressed_tokens=int(getattr(result, "compressed_tokens", original)),
+            text=out,
+            original_tokens=int(getattr(stats, "original_tokens", original) or original),
+            compressed_tokens=int(getattr(stats, "compressed_tokens", original) or original),
             applied=True,
         )
     except Exception as exc:  # noqa: BLE001

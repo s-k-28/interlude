@@ -113,11 +113,21 @@ def compress_messages(
         compressed, _tools, stats, _stubbed = engine.process_request(
             messages, tools, upstream_model
         )
+        orig = int(getattr(stats, "original_tokens", 0) or 0)
+        comp = int(getattr(stats, "compressed_tokens", 0) or 0)
+        items = int(getattr(stats, "items_compressed", 0) or 0)
+
+        # Paritok reports 0/0 when it skips every item. Pairing that zero with a
+        # locally-counted input would compute a 100% saving from two different
+        # instruments. If the SDK compressed nothing, we measured nothing.
+        if items == 0 or orig == 0:
+            return ClientCompression(compressed, 0, 0, 0, applied=False)
+
         return ClientCompression(
             messages=compressed,
-            original_tokens=int(getattr(stats, "original_tokens", 0) or 0),
-            compressed_tokens=int(getattr(stats, "compressed_tokens", 0) or 0),
-            items_compressed=int(getattr(stats, "items_compressed", 0) or 0),
+            original_tokens=orig,
+            compressed_tokens=comp,
+            items_compressed=items,
             applied=True,
         )
     except Exception as exc:  # noqa: BLE001 - optimization, never fatal

@@ -56,6 +56,22 @@ TOKEN_KEYS = frozenset(
 )
 
 
+_MANIFEST_CACHE: dict[str, object] = {}
+
+
+def cached_manifest(state):
+    """One manifest per job id.
+
+    Manifest.new() timestamps from the clock, so rebuilding yields a different
+    canonical_hash every call. The hash is the product's central claim; it must
+    be stable for the life of the job.
+    """
+    key = state.job_id
+    if key not in _MANIFEST_CACHE:
+        _MANIFEST_CACHE[key] = build_manifest(state)
+    return _MANIFEST_CACHE[key]
+
+
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -139,7 +155,7 @@ class JobRegistry:
             record = self._records.get(job_id)
             if record is None:
                 return None
-            manifest = build_manifest(record.state)
+            manifest = cached_manifest(record.state)
             payload = manifest.to_payload()
             payload["canonical_hash"] = manifest.canonical_hash()
             return payload
@@ -226,7 +242,7 @@ def _manifest_hash(state: JobState) -> str:
     the detail endpoint would hide the very state an operator is inspecting.
     """
     try:
-        return build_manifest(state).canonical_hash()
+        return cached_manifest(state).canonical_hash()
     except Exception:  # noqa: BLE001
         return ""
 
